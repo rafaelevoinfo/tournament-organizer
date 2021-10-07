@@ -168,15 +168,15 @@ class Tournament {
                     const m = this.activeMatches().find(x => x.playerOne.id === player.id || x.playerTwo.id === player.id);
                     if (m !== undefined) {
                         if (this.doubleElim) {
-                            newMatches = m.playerOne.id === player.id ? this.result(m, 0, 2, 0, false) : this.result(m, 2, 0, 0, false);
+                            newMatches = m.playerOne.id === player.id ? this.result(m, 0, Math.ceil(this.bestOf / 2), 0, false) : this.result(m, Math.ceil(this.bestOf / 2), 0, 0, false);
                             m.loserPath.playerTwo = undefined;
-                            if (m.loserPath.playerOne !== null) newMatches = newMatches.concat(this.result(m.loserPath, 2, 0));
+                            if (m.loserPath.playerOne !== null) newMatches = newMatches.concat(this.result(m.loserPath, Math.ceil(this.bestOf / 2), 0));
                         }
-                        else newMatches = m.playerOne.id === player.id ? this.result(m, 0, 2) : this.result(m, 2, 0);
+                        else newMatches = m.playerOne.id === player.id ? this.result(m, 0, Math.ceil(this.bestOf / 2)) : this.result(m, Math.ceil(this.bestOf / 2), 0);
                     }
                 } else if (this.format === 'robin') {
                     const now = this.activeMatches(this.currentRound).find(x => x.playerOne.id === player.id || x.playerTwo.id === player.id);
-                    if (now !== undefined && now.active) newMatches = now.playerOne.id === player.id ? this.result(now, 0, 2) : this.result(now, 2, 0);
+                    if (now !== undefined && now.active) newMatches = now.playerOne.id === player.id ? this.result(now, 0, Math.ceil(this.bestOf / 2)) : this.result(now, Math.ceil(this.bestOf / 2), 0);
                     for (let i = this.currentRound + 1; i < this.matches.reduce((x, y) => Math.max(x, y.round), 0); i++) {
                         const curr = this.matches.filter(r => r.round === i).find(x => x.playerOne.id === player.id || x.playerTwo.id === player.id);
                         if (curr.playerOne.id === player.id) curr.playerOne = null;
@@ -184,7 +184,7 @@ class Tournament {
                     }
                 } else if (this.format === 'swiss') {
                     const m = this.activeMatches().find(x => x.playerOne.id === player.id || x.playerTwo.id === player.id);
-                    if (m !== undefined && m.active) newMatches = m.playerOne.id === player.id ? this.result(m, 0, 2) : this.result(m, 2, 0);
+                    if (m !== undefined && m.active) newMatches = m.playerOne.id === player.id ? this.result(m, 0, Math.ceil(this.bestOf / 2)) : this.result(m, Math.ceil(this.bestOf / 2), 0);
                 }
                 return newMatches;
             }
@@ -197,7 +197,7 @@ class Tournament {
      * @param {Match} match Match to have results undone.
      */
     undoResults(match) {
-        if(match.playerOne === null || match.playerTwo === null) return;
+        if (match.playerOne === null || match.playerTwo === null || match.active) return;
         match.resetResults(this.winValue, this.lossValue, this.drawValue);
         match.playerOneWins = 0;
         match.playerTwoWins = 0;
@@ -321,6 +321,13 @@ class Swiss extends Tournament {
          * @default 0
          */
         this.currentRound = 0;
+
+        /**
+         * If the event is ready to proceed to the next round.
+         * @type {Boolean}
+         * @default false
+         */
+        this.nextRoundReady = false;
     }
     
     /**
@@ -333,9 +340,12 @@ class Swiss extends Tournament {
         if (this.numberOfRounds === null) this.numberOfRounds = Math.ceil(Math.log2(this.players.length));
         this.currentRound++;
         if (this.dutch) this.matches = this.matches.concat(Algorithms.dutch(this.matches, this.players, this.currentRound, 0));
-        else this.matches = this.matches.concat(Algorithms.swiss(this.matches, this.players, this.currentRound, 0, this.seededPlayers));
+        else {
+            const seedPref = this.seededPlayers ? this.seedOrder : null;
+            this.matches = this.matches.concat(Algorithms.swiss(this.matches, this.players, this.currentRound, 0, seedPref));
+        }
         const bye = this.matches.filter(r => r.round === this.currentRound).find(m => m.playerTwo === null);
-        if (bye !== undefined) this.result(bye, this.bestOf, 0);
+        if (bye !== undefined) this.result(bye, Math.ceil(this.bestOf / 2), 0);
     }
 
     /**
@@ -389,29 +399,42 @@ class Swiss extends Tournament {
             active = this.activeMatches();
             this.currentRound = active.length === 0 ? -1 : active.reduce((x, y) => Math.min(x, y.round), active[0].round);
         }
-        if (active.length === 0) {
-            if (this.currentRound === this.numberOfRounds) {
-                if (this.playoffs !== null) {
-                    this.currentRound++;
-                    if (this.cutType === 'rank' && this.cutLimit > 0) {
-                        const rankedPlayers = this.standings();
-                        for (let i = this.cutLimit; i < rankedPlayers.length; i++) this.removePlayer(rankedPlayers[i]);
-                    } else if (this.cutType === 'points' && this.cutLimit > 0) this.players.filter(p => p.matchPoints < this.cutLimit).forEach(p => this.removePlayer(p));
-                    if (this.playoffs === 'elim') Algorithms.elim(this.matches, this.players.filter(p => p.active), this.thirdPlaceMatch, this.currentRound);
-                    else Algorithms.doubleElim(this.matches, this.players.filter(p => p.active), this.currentRound);
-                    newMatches = this.activeMatches();
-                } else this.active = false;
-            } else if (this.currentRound > this.numberOfRounds || this.currentRound === -1) this.active = false;
-            else {
-                this.currentRound++;
-                if (this.dutch) this.matches = this.matches.concat(Algorithms.dutch(this.matches, this.players, this.currentRound, this.winValue * (this.currentRound - 1)));
-                else this.matches = this.matches.concat(Algorithms.swiss(this.matches, this.players, this.currentRound, this.winValue * (this.currentRound - 1), this.seededPlayers));
-                const bye = this.matches.filter(r => r.round === this.currentRound).find(m => m.playerTwo === null);
-                if (bye !== undefined) this.result(bye, this.bestOf, 0);
-                newMatches = this.activeMatches();
-            }
-        }
+        if (active.length === 0) this.nextRoundReady = true;
         this.players.forEach(p => Tiebreakers.compute(p, this));
+        return newMatches;
+    }
+
+    /**
+     * Starts the next round, if there are no active matches
+     * @return {(Match[]|Boolean)} Array of new matches, or false if not ready to start the new round.
+     */
+    nextRound() {
+        if (!this.nextRoundReady) return false;
+        let newMatches = [];
+        this.nextRoundReady = false;
+        if (this.currentRound === this.numberOfRounds) {
+            if (this.playoffs !== null) {
+                this.currentRound++;
+                if (this.cutType === 'rank' && this.cutLimit > 0) {
+                    const rankedPlayers = this.standings();
+                    for (let i = this.cutLimit; i < rankedPlayers.length; i++) this.removePlayer(rankedPlayers[i]);
+                } else if (this.cutType === 'points' && this.cutLimit > 0) this.players.filter(p => p.matchPoints < this.cutLimit).forEach(p => this.removePlayer(p));
+                if (this.playoffs === 'elim') Algorithms.elim(this.matches, this.players.filter(p => p.active), this.thirdPlaceMatch, this.currentRound);
+                else Algorithms.doubleElim(this.matches, this.players.filter(p => p.active), this.currentRound);
+                newMatches = this.activeMatches();
+            } else this.active = false;
+        } else if (this.currentRound > this.numberOfRounds || this.currentRound === -1) this.active = false;
+        else {
+            this.currentRound++;
+            if (this.dutch) this.matches = this.matches.concat(Algorithms.dutch(this.matches, this.players.filter(p => p.active), this.currentRound, this.winValue * (this.currentRound - 1)));
+            else {
+                const seedPref = this.seededPlayers ? this.seedOrder : null;
+                this.matches = this.matches.concat(Algorithms.swiss(this.matches, this.players.filter(p => p.active), this.currentRound, this.winValue * (this.currentRound - 1), seedPref));
+            }
+            const bye = this.matches.filter(r => r.round === this.currentRound).find(m => m.playerTwo === null);
+            if (bye !== undefined) this.result(bye, Math.ceil(this.bestOf / 2), 0);
+            newMatches = this.activeMatches();
+        }
         return newMatches;
     }
 }
@@ -423,14 +446,19 @@ class Swiss extends Tournament {
  class SwissReloaded extends Swiss {
     constructor(tournament) {
         super(tournament.id);
+        ['players', 'matches'].forEach(prop => tournament[prop] = tournament.hasOwnProperty(prop) ? tournament[prop] : []);
         Object.assign(this, tournament);
         this.players = this.players.map(p => new Player(p));
         this.matches = this.matches.map(m => new Match(m))
         this.matches.forEach(m => {
-            const p1 = this.players.find(p => m.playerOne.id === p.id);
-            if (p1 !== undefined) m.playerOne = p1;
-            const p2 = this.players.find(p => m.playerTwo.id === p.id);
-            if (p2 !== undefined) m.playerTwo = p2;
+            if (m.playerOne !== undefined) {
+                const p1 = this.players.find(p => m.playerOne.id === p.id);
+                if (p1 !== undefined) m.playerOne = p1;
+            }
+            if (m.playerTwo !== undefined) {
+                const p2 = this.players.find(p => m.playerTwo.id === p.id);
+                if (p2 !== undefined) m.playerTwo = p2;
+            }
         });
     }
  }
@@ -531,6 +559,13 @@ class RoundRobin extends Tournament {
          * @default 0
          */
         this.currentRound = 0;
+
+        /**
+         * If the event is ready to proceed to the next round.
+         * @type {Boolean}
+         * @default false
+         */
+         this.nextRoundReady = false;
     }
 
     /**
@@ -627,38 +662,48 @@ class RoundRobin extends Tournament {
             active = this.activeMatches();
             this.currentRound = active.length === 0 ? -1 : active.reduce((x, y) => Math.min(x, y.round), active[0].round);
         }
-        if (active.length === 0) {
-            if (this.currentRound === this.numberOfRounds) {
-                if (this.playoffs !== null) {
-                    this.currentRound++;
-                    if (this.cutType === 'rank' && this.cutLimit > 0) {
-                        if (this.cutEachGroup) {
-                            this.groups.forEach(g => {
-                                const rankedGroup = this.groupStandings(g);
-                                for (let i = this.cutLimit; i < g.length; i++) this.removePlayer(rankedGroup[i]);
-                            });
-                        } else {
-                            const rankedPlayers = this.standings();
-                            for (let i = this.cutLimit; i < rankedPlayers.length; i++) this.removePlayer(rankedPlayers[i]);
-                        }
-                    } else if (this.cutType === 'points' && this.cutLimit > 0) this.players.filter(p => p.matchPoints < this.cutLimit).forEach(p => this.removePlayer(p));
-                    if (this.playoffs === 'elim') Algorithms.elim(this.matches, this.standings(), this.thirdPlaceMatch, this.currentRound);
-                    else Algorithms.doubleElim(this.matches, this.standings(), this.currentRound);
-                    newMatches = this.activeMatches();
-                } else this.active = false;
-            } else if (this.currentRound > this.numberOfRounds || this.currentRound === -1) this.active = false;
-            else {
-                this.currentRound++;
-                const nextRound = this.matches.filter(p => p.round === this.currentRound);
-                nextRound.forEach(m => {
-                    if (m.playerOne !== null && m.playerTwo !== null) m.active = true;
-                });
-                const byes = nextRound.filter(m => m.playerOne === null || m.playerTwo === null);
-                byes.forEach(b => b.playerOne === null ? this.result(b, 0, Math.ceil(this.bestOf / 2)) : this.result(b, Math.ceil(this.bestOf / 2), 0));
-                newMatches = this.activeMatches();
-            }
-        }
+        if (active.length === 0) this.nextRoundReady = true;
         this.players.forEach(p => Tiebreakers.compute(p, this));
+        return newMatches;
+    }
+
+    /**
+     * Starts the next round, if there are no active matches
+     * @return {(Match[]|Boolean)} Array of new matches, or false if not ready to start the new round.
+     */
+     nextRound() {
+        if (!this.nextRoundReady) return false;
+        let newMatches = [];
+        this.nextRoundReady = false;
+        if (this.currentRound === this.numberOfRounds) {
+            if (this.playoffs !== null) {
+                this.currentRound++;
+                if (this.cutType === 'rank' && this.cutLimit > 0) {
+                    if (this.cutEachGroup) {
+                        this.groups.forEach(g => {
+                            const rankedGroup = this.groupStandings(g);
+                            for (let i = this.cutLimit; i < g.length; i++) this.removePlayer(rankedGroup[i]);
+                        });
+                    } else {
+                        const rankedPlayers = this.standings();
+                        for (let i = this.cutLimit; i < rankedPlayers.length; i++) this.removePlayer(rankedPlayers[i]);
+                    }
+                } else if (this.cutType === 'points' && this.cutLimit > 0) this.players.filter(p => p.matchPoints < this.cutLimit).forEach(p => this.removePlayer(p));
+                if (this.playoffs === 'elim') Algorithms.elim(this.matches, this.standings(), this.thirdPlaceMatch, this.currentRound);
+                else Algorithms.doubleElim(this.matches, this.standings(), this.currentRound);
+                newMatches = this.activeMatches();
+            } else this.active = false;
+        } else if (this.currentRound > this.numberOfRounds || this.currentRound === -1) this.active = false;
+        else {
+            this.currentRound++;
+            const nextRound = this.matches.filter(p => p.round === this.currentRound);
+            nextRound.forEach(m => {
+                if (m.playerOne !== null && m.playerTwo !== null) m.active = true;
+            });
+            const byes = nextRound.filter(m => m.playerOne === null || m.playerTwo === null);
+            byes.forEach(b => b.playerOne === null ? this.result(b, 0, Math.ceil(this.bestOf / 2)) : this.result(b, Math.ceil(this.bestOf / 2), 0));
+            newMatches = this.activeMatches();
+        }
         return newMatches;
     }
 
@@ -693,14 +738,19 @@ class RoundRobin extends Tournament {
  class RoundRobinReloaded extends RoundRobin {
     constructor(tournament) {
         super(tournament.id);
+        ['players', 'matches', 'groups'].forEach(prop => tournament[prop] = tournament.hasOwnProperty(prop) ? tournament[prop] : []);
         Object.assign(this, tournament);
         this.players = this.players.map(p => new Player(p));
         this.matches = this.matches.map(m => new Match(m));
         this.matches.forEach(m => {
-            const p1 = this.players.find(p => m.playerOne.id === p.id);
-            if (p1 !== undefined) m.playerOne = p1;
-            const p2 = this.players.find(p => m.playerTwo.id === p.id);
-            if (p2 !== undefined) m.playerTwo = p2;
+            if (m.playerOne !== undefined) {
+                const p1 = this.players.find(p => m.playerOne.id === p.id);
+                if (p1 !== undefined) m.playerOne = p1;
+            }
+            if (m.playerTwo !== undefined) {
+                const p2 = this.players.find(p => m.playerTwo.id === p.id);
+                if (p2 !== undefined) m.playerTwo = p2;
+            }
         });
     }
  }
@@ -799,10 +849,14 @@ class Elimination extends Tournament {
         this.players = this.players.map(p => new Player(p));
         this.matches = this.matches.map(m => new Match(m));
         this.matches.forEach(m => {
-            const p1 = this.players.find(p => m.playerOne.id === p.id);
-            if (p1 !== undefined) m.playerOne = p1;
-            const p2 = this.players.find(p => m.playerTwo.id === p.id);
-            if (p2 !== undefined) m.playerTwo = p2;
+            if (m.playerOne !== undefined) {
+                const p1 = this.players.find(p => m.playerOne.id === p.id);
+                if (p1 !== undefined) m.playerOne = p1;
+            }
+            if (m.playerTwo !== undefined) {
+                const p2 = this.players.find(p => m.playerTwo.id === p.id);
+                if (p2 !== undefined) m.playerTwo = p2;
+            }
         });
     }
  }
