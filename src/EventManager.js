@@ -37,6 +37,7 @@ class EventManager {
         let tournament;
         if (options.format === 'swiss') tournament = new Tournament.Swiss(thisid, options);
         else if (options.format === 'robin') tournament = new Tournament.RoundRobin(thisid, options);
+        else if (options.format === 'pontos-corridos') tournament = new Tournament.PontosCorridos(thisid, options);
         else tournament = new Tournament.Elimination(thisid, options);
         this.tournaments.push(tournament);
         return tournament;

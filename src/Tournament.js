@@ -43,10 +43,10 @@ class Tournament {
 
         /**
          * Format for the first stage of the tournament.
-         * @type {('elim'|'robin'|'swiss')}
+         * @type {('elim'|'robin'|'swiss|pontos-corridos')}
          * @default 'elim'
          */
-        this.format = options.hasOwnProperty('format') && ['elim', 'robin', 'swiss'].includes(options.format) ? options.format : 'elim';
+        this.format = options.hasOwnProperty('format') && ['elim', 'robin', 'swiss', 'pontos-corridos'].includes(options.format) ? options.format : 'elim';
 
         /**
          * If there is a third place consolation match.
@@ -329,7 +329,7 @@ class Swiss extends Tournament {
          */
         this.nextRoundReady = false;
     }
-    
+
     /**
      * Starts the tournament.
      */
@@ -443,7 +443,7 @@ class Swiss extends Tournament {
  * Class recreating a Swiss pairing tournament from an existing object. 
  * @extends Swiss
  */
- class SwissReloaded extends Swiss {
+class SwissReloaded extends Swiss {
     constructor(tournament) {
         super(tournament.id);
         ['players', 'matches'].forEach(prop => tournament[prop] = tournament.hasOwnProperty(prop) ? tournament[prop] : []);
@@ -461,7 +461,7 @@ class Swiss extends Tournament {
             }
         });
     }
- }
+}
 
 /** 
  * Class representing a round-robin pairing tournament. 
@@ -565,7 +565,7 @@ class RoundRobin extends Tournament {
          * @type {Boolean}
          * @default false
          */
-         this.nextRoundReady = false;
+        this.nextRoundReady = false;
     }
 
     /**
@@ -671,7 +671,7 @@ class RoundRobin extends Tournament {
      * Starts the next round, if there are no active matches
      * @return {(Match[]|Boolean)} Array of new matches, or false if not ready to start the new round.
      */
-     nextRound() {
+    nextRound() {
         if (!this.nextRoundReady) return false;
         let newMatches = [];
         this.nextRoundReady = false;
@@ -735,7 +735,7 @@ class RoundRobin extends Tournament {
  * Class recreating a round-robin pairing tournament from an existing object. 
  * @extends RoundRobin
  */
- class RoundRobinReloaded extends RoundRobin {
+class RoundRobinReloaded extends RoundRobin {
     constructor(tournament) {
         super(tournament.id);
         ['players', 'matches', 'groups'].forEach(prop => tournament[prop] = tournament.hasOwnProperty(prop) ? tournament[prop] : []);
@@ -753,7 +753,7 @@ class RoundRobin extends Tournament {
             }
         });
     }
- }
+}
 
 /** 
  * Class representing an elimination tournament. 
@@ -767,7 +767,7 @@ class Elimination extends Tournament {
      */
     constructor(id, options = {}) {
         super(id, options);
-        
+
         /**
          * If the format is double elimination.
          * @type {Boolean}
@@ -842,7 +842,7 @@ class Elimination extends Tournament {
  * Class recreating an elimination tournament from an existing object. 
  * @extends Elimination
  */
- class EliminationReloaded extends Elimination {
+class EliminationReloaded extends Elimination {
     constructor(tournament) {
         super(tournament.id);
         Object.assign(this, tournament);
@@ -859,7 +859,149 @@ class Elimination extends Tournament {
             }
         });
     }
- }
+}
+
+class PontosCorridos extends Tournament {
+    /**
+    * Create a new PontosCorridos tournament.
+    * @param {String} id String to be the event ID.
+    * @param {Object} [options={}] Options that can be defined for a tournament.
+    */
+    constructor(id, options = {}) {
+        super(id, options);
+
+        /**
+         * Number of phases where in each phase all players play againts all.         
+         * @type {?Number}
+         * @default 1
+         */
+        this.numberOfPhases = options.numberOfPhases ? options.numberOfPhases : 1;
+        this.tiebreakers = ['matchpoints', 'versus', 'sonneborn-berger'];
+        /**
+         * Current round number.
+         * 0 if the tournament has not started, -1 if the tournament is finished.
+         * @type {Number}
+         * @default 0
+         */
+        this.currentRound = 0;
+
+        /**
+         * Current phase number.
+         * 0 if the tournament has not started
+         * @type {Number}
+         * @default 0
+         */
+        this.currentPhase = 0;
+
+        /**
+         * If the event is ready to proceed to the next round.
+         * @type {Boolean}
+         * @default false
+         */
+        this.nextRoundReady = false;
+    }
+
+    /**
+     * Starts the tournament.
+     */
+    startEvent() {
+        if (this.players.length < 2) return;
+        this.active = true;
+        if (this.seededPlayers) this.players.sort((a, b) => this.seedOrder === 'asc' ? a.seed - b.seed : b.seed - a.seed);
+        this.numberOfRounds = this.players.length % 2 == 0 ? this.players.length - 1 : this.players.length;
+        this.currentRound++;
+        this.currentPhase++;
+
+        this.gerarRodadas();
+
+        this.calcularBye();
+    }
+
+    calcularBye() {
+        const bye = this.matches.filter(r => r.round === this.currentRound).find(m => !m.playerTwo || !m.playerOne);
+        if (bye !== undefined) {
+            if (bye.playerOne === null) {
+                this.result(bye, 0, this.winValue);
+            } else {
+                this.result(bye, this.winValue, 0);
+            }
+        }
+    }
+
+    /**
+     * Storing results of a match.
+     * @param {Match} match The match being reported.
+     * @param {Number} playerOneWins Number of wins for player one.
+     * @param {Number} playerTwoWins Number of wins for player two.
+     * @param {Number} [draws=0] Number of draws.     
+     */
+    result(match, playerOneWins, playerTwoWins, draws = 0) {
+        if (!this.active) return null;
+        if (!match.active && match.playerOne !== null && match.playerTwo !== null) {
+            match.resetResults(this.winValue, this.lossValue, this.drawValue);
+            match.playerOneWins = 0;
+            match.playerTwoWins = 0;
+            match.draws = 0;
+        }
+
+        match.active = false;
+        match.playerOneWins = playerOneWins;
+        match.playerTwoWins = playerTwoWins;
+
+        if (match.playerOne === null) {
+            match.assignBye(2, this.winValue);
+            return null;
+        }
+
+        if (match.playerTwo === null) {
+            match.assignBye(1, this.winValue);
+            return null;
+        }
+
+        match.draws = draws;
+
+        match.resultForPlayers(this.winValue, this.lossValue, this.drawValue);
+        let active = this.activeMatches();
+
+        if (active.length === 0) this.nextRoundReady = true;
+        this.players.forEach(p => Tiebreakers.compute(p, this));
+    }
+
+    /**
+     * Starts the next round, if there are no active matches
+     * @return {(Match[]|Boolean)} Array of new matches, or false if not ready to start the new round.
+     */
+    nextRound() {
+        if (!this.nextRoundReady) return false;
+        let newMatches = [];
+        this.nextRoundReady = false;
+        if (this.currentRound == this.numberOfRounds) {
+            this.currentPhase++;
+            this.currentRound = 0;
+            if (this.currentPhase <= this.numberOfPhases)
+                this.gerarRodadas();
+        }
+        if (this.currentPhase > this.numberOfPhases) this.active = false;
+        else {
+            this.currentRound++;
+            this.matches.forEach(m => {
+                m.active = m.round == this.currentRound && m.phase == this.currentPhase;
+            })
+            this.calcularBye();
+            newMatches = this.activeMatches();
+        }
+        return newMatches;
+    }
+
+    gerarRodadas() {
+        this.matches = this.matches.concat(Algorithms.robin(this.players, false, false));
+        this.matches.forEach(m => {
+            if (!m.phase) {
+                m.phase = this.currentPhase;
+            }
+        })
+    }
+}
 
 module.exports = {
     Tournament,
@@ -868,5 +1010,6 @@ module.exports = {
     RoundRobin,
     RoundRobinReloaded,
     Elimination,
-    EliminationReloaded
+    EliminationReloaded,
+    PontosCorridos
 }
