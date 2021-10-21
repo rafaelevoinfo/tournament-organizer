@@ -918,7 +918,7 @@ class PontosCorridos extends Tournament {
     }
 
     calcularBye() {
-        const bye = this.matches.filter(r => r.round === this.currentRound).find(m => !m.playerTwo || !m.playerOne);
+        const bye = this.matches.filter(r => r.round === this.currentRound && r.phase === this.currentPhase).find(m => !m.playerTwo || !m.playerOne);
         if (bye !== undefined) {
             if (bye.playerOne === null) {
                 this.result(bye, 0, this.winValue);
