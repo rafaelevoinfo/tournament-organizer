@@ -999,6 +999,15 @@ class PontosCorridos extends Tournament {
             if (!m.phase) {
                 m.phase = this.currentPhase;
             }
+            if ((m.phase+1) % 2 === 1){
+                let playerOne = m.playerOne;
+                let playerOneWins = m.playerOneWins;
+                m.playerOne = m.playerTwo;
+                m.playerOneWins = m.playerTwoWins;
+
+                m.playerTwo = playerOne;
+                m.playerTwoWins = playerOneWins;
+            }
         })
     }
 }
